@@ -1,0 +1,80 @@
+.name-input {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.name-input__label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.name-input__hint {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.name-input__textarea {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-card);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.name-input__textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.name-input__textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.name-input__warning {
+  font-size: 0.8rem;
+  color: var(--color-primary-dark);
+  background: rgba(218, 119, 86, 0.1);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.name-input__spin-btn {
+  width: 100%;
+  padding: 14px 24px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  letter-spacing: 0.02em;
+}
+
+.name-input__spin-btn:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+  transform: translateY(-1px);
+}
+
+.name-input__spin-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.name-input__spin-btn:disabled {
+  background: var(--color-text-muted);
+  cursor: not-allowed;
+}

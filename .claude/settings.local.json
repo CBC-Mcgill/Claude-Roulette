@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(cmd /c \"dir /ah\")",
+      "Bash(node --version:*)",
+      "Bash(npm:*)",
+      "WebSearch",
+      "WebFetch(domain:commons.wikimedia.org)",
+      "WebFetch(domain:icons.getbootstrap.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(npx vite build:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

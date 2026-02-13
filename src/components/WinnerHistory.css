@@ -1,0 +1,48 @@
+.winner-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.winner-history__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.winner-history__empty {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.winner-history__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.winner-history__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--color-card);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.winner-history__number {
+  font-weight: 700;
+  color: var(--color-primary);
+  min-width: 28px;
+}
+
+.winner-history__name {
+  color: var(--color-text);
+  word-break: break-word;
+}
