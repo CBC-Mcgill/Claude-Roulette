@@ -1,6 +1,6 @@
 # Claude Roulette
 
-A spinning roulette wheel that randomly picks a name from a user-provided list, with confetti celebrations and dark/light theming.
+A physics-based roulette wheel for raffles of up to 37 people. The ball is driven by real-time physics (friction, gravity, deflector/fret collisions) with no predetermined outcome — wherever it lands is the result.
 
 ## Tech Stack
 
@@ -33,7 +33,7 @@ src/
 ├── hooks/
 │   └── useRouletteState.js      # useReducer-based state (names, spinning, winner)
 └── utils/
-    ├── wheelMath.js             # Geometry/math helpers for the wheel
+    ├── wheelMath.js             # Geometry helpers + physics engine (PHYSICS_CONFIG, state machine, collision detection)
     └── confettiPresets.js       # Confetti animation configurations
 public/                          # Static assets
 ```
@@ -46,6 +46,19 @@ public/                          # Static assets
 - **CSS**: BEM methodology; theming via CSS custom properties on `:root` / `[data-theme="dark"]`
 - **React**: Functional components only; use `useCallback` for event handler optimization
 - **No TypeScript** — plain JS/JSX throughout
+
+## Physics Engine (`wheelMath.js`)
+
+All physics parameters live in `PHYSICS_CONFIG`. The ball state machine:
+
+1. **`on_track`** — Ball decelerates via friction (`ω += friction * dt`) until below critical velocity
+2. **`dropping`** — Ball spirals inward with radial acceleration + drag; deflector collisions bounce it radially
+3. **`in_pocket`** — Ball bounces off fret dividers (velocity reflected × restitution) in wheel-relative coords
+4. **`settled`** — Relative velocity to wheel below threshold; ball snaps to pocket center
+
+Pocket indexing uses a `+PI/2` offset to match the rendering origin (pockets drawn from `-PI/2` / top of wheel).
+
+When the ball lands on an empty pocket (no name assigned), `onSpinEnd(-1)` fires and a "No Winner" announcement is shown.
 
 ## Theme System
 

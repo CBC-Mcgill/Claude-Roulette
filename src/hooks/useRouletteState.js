@@ -31,7 +31,9 @@ function reducer(state, action) {
     }
     case 'SPIN_COMPLETE': {
       const index = action.payload;
-      if (index < 0 || index >= state.names.length) return { ...state, spinning: false };
+      if (index < 0 || index >= state.names.length) {
+        return { ...state, spinning: false, winner: '__NO_WINNER__' };
+      }
       const winnerName = state.names[index];
       return {
         ...state,

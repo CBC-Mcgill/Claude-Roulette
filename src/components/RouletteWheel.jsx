@@ -7,26 +7,23 @@ import {
   normalizeAngle,
   distributeNames,
   getBallPosition,
-  lerp,
-  easeOutBounce,
-  easeOutCubic,
+  createPhysicsState,
+  updateWheelPhysics,
+  updateBallOnTrack,
+  updateBallDropping,
+  updateBallInPocket,
+  randomBallVelocity,
+  getPocketAtBall,
 } from '../utils/wheelMath';
 import './RouletteWheel.css';
-
-// Animation timing (ms)
-const BALL_TRACK_DURATION = 3000;
-const BALL_DROP_DURATION = 1000;
-const BALL_SETTLE_DURATION = 500;
-const TOTAL_DURATION = BALL_TRACK_DURATION + BALL_DROP_DURATION + BALL_SETTLE_DURATION;
-
-// Wheel rotation
-const WHEEL_SPEED = 0.3; // radians per second (slow continuous)
-const BALL_INITIAL_SPEED = 12; // radians per second (fast, opposite direction)
 
 const MIN_CANVAS_SIZE = 200;
 const MAX_CANVAS_SIZE = 700;
 
 const NUM_DEFLECTORS = 8;
+
+// Safety timeout: force-settle after 15 seconds
+const MAX_SPIN_DURATION = 15000;
 
 // Distinct color palette for names
 const NAME_COLORS = [
@@ -397,7 +394,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
     };
   }, [draw, onSpin, names]);
 
-  // Spin animation
+  // Physics-based spin animation
   useEffect(() => {
     if (!spinning) return;
     if (spinningRef.current) return;
@@ -410,17 +407,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
       return;
     }
 
-    // Pre-determine winner: pick a random name, find its single pocket
-    const winnerIndex = Math.floor(Math.random() * names.length);
-    const winnerName = names[winnerIndex];
-    const targetPocket = pocketNames.indexOf(winnerName);
-
-    // Calculate target angle for the ball to land in this pocket
-    // Pocket i spans from (i * segmentAngle - PI/2) in wheel-local coords
-    // The ball angle in world coords where the pocket center is:
-    // worldAngle = wheelFinalAngle + (targetPocket * segmentAngle + segmentAngle/2 - PI/2)
-    // We want the ball to end up at that world angle.
-
+    // Compute radii
     const size = sizeRef.current;
     const half = size / 2;
     const outerRadius = half - 2;
@@ -433,74 +420,91 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
     const ballTrackR = (trackOuterR + trackInnerR) / 2;
     const pocketR = (pocketOuterR + pocketInnerR) / 2;
 
-    const startTime = performance.now();
     const initialWheelAngle = wheelAngleRef.current;
-
-    // Ball starts opposite to wheel rotation
     const ballStartAngle = Math.random() * 2 * Math.PI;
+    const ballVelocity = randomBallVelocity();
+
+    // Create physics state — no rigging, pure physics
+    const physState = createPhysicsState(
+      initialWheelAngle, ballStartAngle, ballVelocity, ballTrackR, pocketR
+    );
+
+    const startTime = performance.now();
+    let lastTime = startTime;
+
+    function finishSpin(settledPocket) {
+      // Snap ball to pocket center
+      const pocketLocalAngle = settledPocket * segmentAngle + segmentAngle / 2 - Math.PI / 2;
+      const finalBallAngle = physState.wheel.angle + pocketLocalAngle;
+
+      wheelAngleRef.current = physState.wheel.angle;
+      draw(physState.wheel.angle, finalBallAngle, pocketR, true, settledPocket);
+
+      spinningRef.current = false;
+      winningPocketRef.current = settledPocket;
+      showWinHighlightRef.current = true;
+      animFrameRef.current = null;
+
+      // Check if the pocket has a name — if not, no winner (pass -1)
+      const nameInPocket = pocketNames[settledPocket];
+      if (nameInPocket) {
+        const winnerIndex = names.indexOf(nameInPocket);
+        onSpinEnd(winnerIndex);
+      } else {
+        onSpinEnd(-1);
+      }
+    }
 
     function animate(now) {
+      let dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      // Clamp dt to avoid huge jumps (e.g., tab was backgrounded)
+      if (dt > 0.05) dt = 0.05;
+
       const elapsed = now - startTime;
-      const progress = Math.min(elapsed / TOTAL_DURATION, 1);
 
-      // Wheel rotates slowly clockwise throughout
-      const wheelAngle = initialWheelAngle + WHEEL_SPEED * (elapsed / 1000);
-
-      let ballAngle, ballR, showBall, highlightPocket;
-      showBall = true;
-      highlightPocket = -1;
-
-      if (elapsed < BALL_TRACK_DURATION) {
-        // Phase 1: Ball on outer track, decelerating
-        const trackProgress = elapsed / BALL_TRACK_DURATION;
-        const decel = easeOutCubic(trackProgress);
-        // Ball moves counter-clockwise (negative direction)
-        const ballSpeed = BALL_INITIAL_SPEED * (1 - decel * 0.85);
-        ballAngle = ballStartAngle - BALL_INITIAL_SPEED * (elapsed / 1000) * (1 - decel * 0.5);
-        ballR = ballTrackR;
-      } else if (elapsed < BALL_TRACK_DURATION + BALL_DROP_DURATION) {
-        // Phase 2: Ball drops from track into pockets with bouncing
-        const dropElapsed = elapsed - BALL_TRACK_DURATION;
-        const dropProgress = dropElapsed / BALL_DROP_DURATION;
-
-        // Target pocket angle in world coords
-        const pocketLocalAngle = targetPocket * segmentAngle + segmentAngle / 2 - Math.PI / 2;
-        const targetWorldAngle = wheelAngle + pocketLocalAngle;
-
-        // Ball angle at end of track phase
-        const trackEndBallAngle = ballStartAngle - BALL_INITIAL_SPEED * (BALL_TRACK_DURATION / 1000) * 0.5;
-
-        // Interpolate angle toward target with bounce effect
-        const bounceT = easeOutBounce(dropProgress);
-        ballAngle = lerp(trackEndBallAngle, targetWorldAngle, bounceT);
-
-        // Radius drops from track to pocket
-        ballR = lerp(ballTrackR, pocketR, bounceT);
-      } else {
-        // Phase 3: Ball settled in pocket
-        const settleElapsed = elapsed - BALL_TRACK_DURATION - BALL_DROP_DURATION;
-        const settleProgress = settleElapsed / BALL_SETTLE_DURATION;
-
-        // Ball stays in the winning pocket, following wheel rotation
-        const pocketLocalAngle = targetPocket * segmentAngle + segmentAngle / 2 - Math.PI / 2;
-        ballAngle = wheelAngle + pocketLocalAngle;
-        ballR = pocketR;
-        highlightPocket = targetPocket;
+      // Safety timeout
+      if (elapsed > MAX_SPIN_DURATION) {
+        const pocket = getPocketAtBall(physState.ball.angle, physState.wheel.angle, segmentAngle);
+        finishSpin(pocket);
+        return;
       }
 
-      wheelAngleRef.current = wheelAngle;
-      draw(wheelAngle, ballAngle, ballR, showBall, highlightPocket);
+      // Update wheel
+      updateWheelPhysics(physState.wheel, dt);
 
-      if (progress < 1) {
-        animFrameRef.current = requestAnimationFrame(animate);
-      } else {
-        // Animation complete
-        spinningRef.current = false;
-        winningPocketRef.current = targetPocket;
-        showWinHighlightRef.current = true;
-        animFrameRef.current = null;
-        onSpinEnd(winnerIndex);
+      // Update ball based on state
+      let highlightPocket = -1;
+
+      switch (physState.ball.state) {
+        case 'on_track':
+          updateBallOnTrack(physState.ball, dt);
+          break;
+        case 'dropping':
+          updateBallDropping(physState.ball, dt, physState.wheel.angle);
+          break;
+        case 'in_pocket':
+          updateBallInPocket(physState.ball, dt, physState.wheel.angle, physState.wheel.velocity, segmentAngle);
+          break;
+        case 'settled': {
+          const pocket = getPocketAtBall(physState.ball.angle, physState.wheel.angle, segmentAngle);
+          finishSpin(pocket);
+          return;
+        }
       }
+
+      // Draw current state
+      wheelAngleRef.current = physState.wheel.angle;
+      draw(
+        physState.wheel.angle,
+        physState.ball.angle,
+        physState.ball.radius,
+        true,
+        highlightPocket
+      );
+
+      animFrameRef.current = requestAnimationFrame(animate);
     }
 
     animFrameRef.current = requestAnimationFrame(animate);
