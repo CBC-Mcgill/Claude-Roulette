@@ -504,7 +504,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
 
       // Trigger collision sounds
       if (collision?.deflectorHit) triggerCollision('deflector');
-      if (collision?.fretHit) triggerCollision('fret');
+      if (collision?.fretHit) triggerCollision('fret', collision.fretHitVelocity);
 
       // Update rolling audio each frame
       updateAudio(physState);
