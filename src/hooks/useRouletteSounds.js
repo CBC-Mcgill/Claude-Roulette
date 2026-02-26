@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import { lerp } from '../utils/wheelMath';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { lerp, PHYSICS_CONFIG } from '../utils/wheelMath';
 
 export const AUDIO_CONFIG = {
   noiseBufferSeconds: 2,
@@ -26,7 +26,7 @@ export const AUDIO_CONFIG = {
   rollingSettleRampMs: 150,
   gainSmoothTime: 0.04,   // seconds (setTargetAtTime time constant)
 
-  maxBallVelocity: 14,    // rad/s (matches ballInitialSpeedMax in PHYSICS_CONFIG)
+  maxBallVelocity: PHYSICS_CONFIG.ballInitialSpeedMax, // rad/s — sourced from PHYSICS_CONFIG
 
   // Deflector hit: sharp metallic tick
   deflectorFilterFreq: 2500,
@@ -68,8 +68,8 @@ function fillPinkNoise(buffer) {
       b3 = 0.86650 * b3 + w * 0.3104856;
       b4 = 0.55000 * b4 + w * 0.5329522;
       b5 = -0.7616  * b5 - w * 0.0168980;
+      b6 = w * 0.115926; // Fix 5: assign b6 BEFORE it is used in the output sum
       data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
-      b6 = w * 0.115926;
     }
   }
 }
@@ -84,7 +84,8 @@ function makeNoiseBurst(ctx, durationSecs) {
 }
 
 /** Fire the one-shot settle thud: a low sine thump + a short click. */
-function fireSettleThud(ctx, masterGain) {
+// Fix 4: accept pre-allocated settleClickBuf instead of calling makeNoiseBurst
+function fireSettleThud(ctx, masterGain, settleClickBuf) {
   const cfg = AUDIO_CONFIG;
   const now = ctx.currentTime;
 
@@ -103,7 +104,7 @@ function fireSettleThud(ctx, masterGain) {
   // Short hard click (noise burst through resonant filter)
   const clickDur = cfg.settleClickMs / 1000;
   const clickSrc = ctx.createBufferSource();
-  clickSrc.buffer = makeNoiseBurst(ctx, clickDur);
+  clickSrc.buffer = settleClickBuf; // Fix 4: use pre-allocated buffer
   const clickFilter = ctx.createBiquadFilter();
   clickFilter.type = 'bandpass';
   clickFilter.frequency.value = cfg.settleClickFilterFreq;
@@ -123,15 +124,25 @@ export default function useRouletteSounds() {
     localStorage.getItem('claude-roulette-sound') === 'muted'
   );
 
-  const ctxRef         = useRef(null);
-  const masterGainRef  = useRef(null);
-  const rollingGainRef = useRef(null);
-  const tremoloGainRef = useRef(null);
-  const filterRef      = useRef(null);
-  const lfoRef         = useRef(null);
-  const settleTimerRef = useRef(null);
-  const settledRef     = useRef(false); // prevents thud firing on every settled frame
+  // Fix 1: keep isMuted in a ref so ensureContext can read it without closing over state
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted; // keep in sync on every render (no useEffect needed)
 
+  const ctxRef          = useRef(null);
+  const masterGainRef   = useRef(null);
+  const rollingGainRef  = useRef(null);
+  const tremoloGainRef  = useRef(null);
+  const filterRef       = useRef(null);
+  const lfoRef          = useRef(null);
+  // Fix 2: store noiseSource so it can be stopped on unmount
+  const noiseSourceRef  = useRef(null);
+  // Fix 4: pre-allocated noise buffers
+  const deflectorBufRef    = useRef(null);
+  const fretBufRef         = useRef(null);
+  const settleClickBufRef  = useRef(null);
+  const settledRef      = useRef(false); // prevents thud firing on every settled frame
+
+  // Fix 1: dep array is [] — isMuted is read via isMutedRef instead of closure
   const ensureContext = useCallback(() => {
     if (ctxRef.current) return;
 
@@ -140,7 +151,7 @@ export default function useRouletteSounds() {
 
     // masterGain → destination
     const masterGain = ctx.createGain();
-    masterGain.gain.value = isMuted ? 0 : 1;
+    masterGain.gain.value = isMutedRef.current ? 0 : 1; // Fix 1: use ref
     masterGain.connect(ctx.destination);
     masterGainRef.current = masterGain;
 
@@ -176,6 +187,7 @@ export default function useRouletteSounds() {
     noiseSource.loop = true;
     noiseSource.connect(filter);
     noiseSource.start();
+    noiseSourceRef.current = noiseSource; // Fix 2: store for cleanup
 
     // LFO → lfoDepthGain → tremoloGain.gain (AudioParam)
     const lfo = ctx.createOscillator();
@@ -187,13 +199,38 @@ export default function useRouletteSounds() {
     lfoDepthGain.connect(tremoloGain.gain);
     lfo.start();
     lfoRef.current = lfo;
-  }, [isMuted]);
+
+    // Fix 4: pre-allocate noise burst buffers to avoid per-call GC pressure
+    const cfg = AUDIO_CONFIG;
+    deflectorBufRef.current   = makeNoiseBurst(ctx, cfg.deflectorDurationMs / 1000);
+    fretBufRef.current        = makeNoiseBurst(ctx, cfg.fretDurationMs / 1000);
+    settleClickBufRef.current = makeNoiseBurst(ctx, cfg.settleClickMs / 1000);
+  }, []); // Fix 1: empty dep array — no longer closes over isMuted state
+
+  // Fix 2: close AudioContext and stop nodes on unmount
+  useEffect(() => {
+    return () => {
+      if (noiseSourceRef.current) {
+        try { noiseSourceRef.current.stop(); } catch (_) {}
+      }
+      if (lfoRef.current) {
+        try { lfoRef.current.stop(); } catch (_) {}
+      }
+      if (ctxRef.current) {
+        ctxRef.current.close();
+        ctxRef.current = null;
+      }
+    };
+  }, []); // run cleanup on unmount only
 
   const updateAudio = useCallback((physState) => {
     ensureContext();
     const ctx = ctxRef.current;
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume();
+
+    // Fix 8: guard against ensureContext throwing before populating refs
+    if (!lfoRef.current) return;
 
     const ball = physState.ball;
     const cfg  = AUDIO_CONFIG;
@@ -203,20 +240,15 @@ export default function useRouletteSounds() {
         settledRef.current = true;
         const ramp = cfg.rollingSettleRampMs / 1000;
         rollingGainRef.current.gain.setTargetAtTime(0, ctx.currentTime, ramp / 3);
-        fireSettleThud(ctx, masterGainRef.current);
-        settleTimerRef.current = setTimeout(() => {
-          settleTimerRef.current = null;
-        }, cfg.rollingSettleRampMs + 100);
+        // Fix 4: pass pre-allocated settleClickBuf; Fix 6: removed dead settleTimerRef block
+        fireSettleThud(ctx, masterGainRef.current, settleClickBufRef.current);
       }
       return;
     }
 
     // Reset for next spin
+    // Fix 6: removed dead settleTimerRef clearTimeout block
     if (settledRef.current) settledRef.current = false;
-    if (settleTimerRef.current) {
-      clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = null;
-    }
 
     const speedNorm = clamp(Math.abs(ball.velocity) / cfg.maxBallVelocity, 0, 1);
 
@@ -249,7 +281,8 @@ export default function useRouletteSounds() {
     ensureContext();
     const ctx = ctxRef.current;
     if (!ctx || !masterGainRef.current) return;
-    if (ctx.state === 'suspended') return;
+    // Fix 3: resume suspended context instead of silently dropping collision sounds
+    if (ctx.state === 'suspended') ctx.resume();
 
     const cfg          = AUDIO_CONFIG;
     const isDeflector  = type === 'deflector';
@@ -260,7 +293,8 @@ export default function useRouletteSounds() {
 
     const now = ctx.currentTime;
     const src = ctx.createBufferSource();
-    src.buffer = makeNoiseBurst(ctx, durationSecs);
+    // Fix 4: use pre-allocated buffer instead of allocating a fresh one per call
+    src.buffer = isDeflector ? deflectorBufRef.current : fretBufRef.current;
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
