@@ -15,6 +15,8 @@ import {
   randomBallVelocity,
   getPocketAtBall,
 } from '../utils/wheelMath';
+import useRouletteSounds from '../hooks/useRouletteSounds';
+import SoundToggle from './SoundToggle';
 import './RouletteWheel.css';
 
 const MIN_CANVAS_SIZE = 200;
@@ -22,8 +24,8 @@ const MAX_CANVAS_SIZE = 700;
 
 const NUM_DEFLECTORS = 8;
 
-// Safety timeout: force-settle after 15 seconds
-const MAX_SPIN_DURATION = 15000;
+// Safety timeout: force-settle after 22 seconds (extended for slower physics)
+const MAX_SPIN_DURATION = 22000;
 
 // Distinct color palette for names
 const NAME_COLORS = [
@@ -35,6 +37,8 @@ const NAME_COLORS = [
 ];
 
 export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, theme }) {
+  const { updateAudio, triggerCollision, isMuted, toggleMute } = useRouletteSounds();
+
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const animFrameRef = useRef(null);
@@ -476,16 +480,17 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
 
       // Update ball based on state
       let highlightPocket = -1;
+      let collision = null;
 
       switch (physState.ball.state) {
         case 'on_track':
           updateBallOnTrack(physState.ball, dt);
           break;
         case 'dropping':
-          updateBallDropping(physState.ball, dt, physState.wheel.angle);
+          collision = updateBallDropping(physState.ball, dt, physState.wheel.angle);
           break;
         case 'in_pocket':
-          updateBallInPocket(physState.ball, dt, physState.wheel.angle, physState.wheel.velocity, segmentAngle);
+          collision = updateBallInPocket(physState.ball, dt, physState.wheel.angle, physState.wheel.velocity, segmentAngle);
           break;
         case 'settled': {
           const pocket = getPocketAtBall(physState.ball.angle, physState.wheel.angle, segmentAngle);
@@ -493,6 +498,13 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
           return;
         }
       }
+
+      // Trigger collision sounds
+      if (collision?.deflectorHit) triggerCollision('deflector');
+      if (collision?.fretHit) triggerCollision('fret');
+
+      // Update rolling audio each frame
+      updateAudio(physState);
 
       // Draw current state
       wheelAngleRef.current = physState.wheel.angle;
@@ -521,6 +533,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
   return (
     <div className="roulette-wheel" ref={containerRef}>
       <canvas ref={canvasRef} className="roulette-wheel__canvas" />
+      <SoundToggle isMuted={isMuted} onToggle={toggleMute} />
     </div>
   );
 }

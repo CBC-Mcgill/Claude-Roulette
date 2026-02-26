@@ -19,8 +19,8 @@ export const AUDIO_CONFIG = {
   // Rolling envelope gain per physics state
   rollingOnTrackMin: 0.4,
   rollingOnTrackMax: 0.9,
-  rollingDroppingMin: 0.3,
-  rollingDroppingMax: 0.7,
+  rollingDroppingMin: 0.5,
+  rollingDroppingMax: 0.88,
   // In-pocket uses relative velocity (ball vs wheel), different filter character
   rollingInPocketMin: 0.3,
   rollingInPocketMax: 0.65,

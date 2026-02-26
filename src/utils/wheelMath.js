@@ -99,13 +99,14 @@ export const PHYSICS_CONFIG = {
   ballCriticalVelocity: 3.0,      // rad/s — below this, ball leaves track
 
   // Ball dropping (spiraling inward)
-  ballRadialAccel: -180.0,        // px/s² inward (toward center)
+  ballRadialAccel: -100.0,        // px/s² inward (toward center) — slower spiral for drama
   ballRadialDrag: -2.5,           // damping factor on radial velocity
   deflectorRestitution: 0.6,      // energy retained on deflector hit
   deflectorCount: 8,
 
   // Ball in pocket
-  fretRestitution: 0.35,          // energy retained on fret bounce
+  inPocketFriction: 0.25,         // exponential decay base for relative velocity (lower = slower settle)
+  fretRestitution: 0.45,          // energy retained on fret bounce
   settleAngularThreshold: 0.1,    // rad/s
   settleRadialThreshold: 0.5,     // px/s
 
@@ -178,6 +179,7 @@ export function updateBallDropping(ball, dt, wheelAngle) {
   ball.radius += ball.radialVelocity * dt;
 
   // Deflector collisions (deflectors are on the ball track)
+  let hitDeflector = false;
   const deflectorR = ball.trackR;
   const deflectorZone = ball.trackR * 0.06;
   if (ball.radius > deflectorR - deflectorZone && ball.radius < deflectorR + deflectorZone) {
@@ -190,6 +192,7 @@ export function updateBallDropping(ball, dt, wheelAngle) {
         ball.radialVelocity *= -cfg.deflectorRestitution;
         ball.velocity *= cfg.deflectorRestitution;
         ball.radius = deflectorR - deflectorZone - 1;
+        hitDeflector = true;
         break;
       }
     }
@@ -200,10 +203,10 @@ export function updateBallDropping(ball, dt, wheelAngle) {
     ball.state = 'in_pocket';
     ball.radius = ball.pocketR;
     ball.radialVelocity = 0;
-    return true;
+    return { reachedPocket: true, deflectorHit: hitDeflector };
   }
 
-  return false;
+  return { reachedPocket: false, deflectorHit: hitDeflector };
 }
 
 /**
@@ -218,7 +221,7 @@ export function updateBallInPocket(ball, dt, wheelAngle, wheelVelocity, segAngle
   let relVel = ball.velocity - wheelVelocity;
 
   // Apply friction to the relative velocity (drag the ball toward wheel speed)
-  relVel *= Math.pow(0.15, dt);
+  relVel *= Math.pow(cfg.inPocketFriction, dt);
 
   // Write back absolute velocity
   ball.velocity = wheelVelocity + relVel;
@@ -233,12 +236,15 @@ export function updateBallInPocket(ball, dt, wheelAngle, wheelVelocity, segAngle
   const distToHighFret = pocketEnd - ballRelAngle;
   const fretThreshold = 0.02;
 
+  let hitFret = false;
   if (distToLowFret < fretThreshold && relVel < 0) {
     relVel *= -cfg.fretRestitution;
     ball.velocity = wheelVelocity + relVel;
+    hitFret = true;
   } else if (distToHighFret < fretThreshold && relVel > 0) {
     relVel *= -cfg.fretRestitution;
     ball.velocity = wheelVelocity + relVel;
+    hitFret = true;
   }
 
   // Settle when relative velocity is small enough
@@ -248,10 +254,10 @@ export function updateBallInPocket(ball, dt, wheelAngle, wheelVelocity, segAngle
     const midAngle = pocketStart + segAngle / 2 - Math.PI / 2;
     ball.angle = wheelAngle + midAngle;
     ball.velocity = wheelVelocity;
-    return true;
+    return { settled: true, fretHit: hitFret };
   }
 
-  return false;
+  return { settled: false, fretHit: hitFret };
 }
 
 /**
