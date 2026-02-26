@@ -237,11 +237,14 @@ export function updateBallInPocket(ball, dt, wheelAngle, wheelVelocity, segAngle
   const fretThreshold = 0.02;
 
   let hitFret = false;
+  let fretHitVelocity = 0;
   if (distToLowFret < fretThreshold && relVel < 0) {
+    fretHitVelocity = Math.abs(relVel);   // capture before bounce
     relVel *= -cfg.fretRestitution;
     ball.velocity = wheelVelocity + relVel;
     hitFret = true;
   } else if (distToHighFret < fretThreshold && relVel > 0) {
+    fretHitVelocity = Math.abs(relVel);   // capture before bounce
     relVel *= -cfg.fretRestitution;
     ball.velocity = wheelVelocity + relVel;
     hitFret = true;
@@ -254,10 +257,10 @@ export function updateBallInPocket(ball, dt, wheelAngle, wheelVelocity, segAngle
     const midAngle = pocketStart + segAngle / 2 - Math.PI / 2;
     ball.angle = wheelAngle + midAngle;
     ball.velocity = wheelVelocity;
-    return { settled: true, fretHit: hitFret };
+    return { settled: true, fretHit: hitFret, fretHitVelocity };
   }
 
-  return { settled: false, fretHit: hitFret };
+  return { settled: false, fretHit: hitFret, fretHitVelocity };
 }
 
 /**
