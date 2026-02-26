@@ -207,19 +207,22 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
         ctx.restore();
       }
 
-      // Fret (pocket separator)
-      ctx.beginPath();
-      ctx.moveTo(
-        Math.cos(startA) * pocketInnerR,
-        Math.sin(startA) * pocketInnerR
-      );
-      ctx.lineTo(
-        Math.cos(startA) * pocketOuterR,
-        Math.sin(startA) * pocketOuterR
-      );
-      ctx.strokeStyle = '#c0c0b0';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      // Fret wall (3D bevel: highlight + body + shadow)
+      const halfFret = segmentAngle * 0.06;
+      const fretLines = [
+        { offset: -halfFret, color: '#e8e8d0', width: 1.5 }, // bright highlight
+        { offset: 0,         color: '#a0a090', width: 2   }, // main body
+        { offset: +halfFret, color: '#404038', width: 1.5 }, // dark shadow
+      ];
+      for (const { offset, color, width } of fretLines) {
+        const a = startA + offset;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * pocketInnerR, Math.sin(a) * pocketInnerR);
+        ctx.lineTo(Math.cos(a) * pocketOuterR, Math.sin(a) * pocketOuterR);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.stroke();
+      }
 
       // Name label — text along the radial direction, reading outward from center
       const midAngle = startA + segmentAngle / 2;
