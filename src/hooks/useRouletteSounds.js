@@ -39,11 +39,13 @@ export const AUDIO_CONFIG = {
   deflectorGain: 0.6,
   deflectorDurationMs: 20,
 
-  // Fret bounce: hollow plastic clack
+  // Fret bounce: metallic clink scaled by impact velocity
   fretFilterFreq: 900,
   fretFilterQ: 8,
   fretGain: 0.35,
   fretDurationMs: 35,
+  fretGainMin: 0.08,        // near-silent graze
+  fretFilterFreqMin: 700,   // dull tick at low velocity (existing fretFilterFreq: 900 becomes max)
 
   // Settle thud: low sine thump + short click on landing
   settleThumpFreq: 120,
@@ -292,7 +294,7 @@ export default function useRouletteSounds() {
     rollingGainRef.current.gain.setTargetAtTime(targetGain, ctx.currentTime, cfg.gainSmoothTime);
   }, [ensureContext]);
 
-  const triggerCollision = useCallback((type) => {
+  const triggerCollision = useCallback((type, velocity) => {
     ensureContext();
     const ctx = ctxRef.current;
     if (!ctx || !masterGainRef.current) return;
@@ -302,9 +304,19 @@ export default function useRouletteSounds() {
     const cfg          = AUDIO_CONFIG;
     const isDeflector  = type === 'deflector';
     const durationSecs = (isDeflector ? cfg.deflectorDurationMs : cfg.fretDurationMs) / 1000;
-    const filterFreq   = isDeflector ? cfg.deflectorFilterFreq  : cfg.fretFilterFreq;
-    const filterQ      = isDeflector ? cfg.deflectorFilterQ     : cfg.fretFilterQ;
-    const peakGain     = isDeflector ? cfg.deflectorGain        : cfg.fretGain;
+
+    let filterFreq, filterQ, peakGain;
+    if (isDeflector) {
+      filterFreq = cfg.deflectorFilterFreq;
+      filterQ    = cfg.deflectorFilterQ;
+      peakGain   = cfg.deflectorGain;
+    } else {
+      const vel     = velocity !== undefined ? velocity : cfg.maxRelVelocity;
+      const velNorm = clamp(vel / cfg.maxRelVelocity, 0, 1);
+      filterFreq    = lerp(cfg.fretFilterFreqMin, cfg.fretFilterFreq, velNorm);
+      filterQ       = cfg.fretFilterQ;
+      peakGain      = lerp(cfg.fretGainMin, cfg.fretGain, velNorm);
+    }
 
     const now = ctx.currentTime;
     const src = ctx.createBufferSource();

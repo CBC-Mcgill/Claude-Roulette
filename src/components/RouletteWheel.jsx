@@ -48,6 +48,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
   const hoverCenterRef = useRef(false);
   const winningPocketRef = useRef(-1);
   const showWinHighlightRef = useRef(false);
+  const prevPocketIdxRef = useRef(-1);
 
   // Memoize pocket layout: only reshuffles when names change
   const pocketNames = useMemo(() => {
@@ -207,19 +208,22 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
         ctx.restore();
       }
 
-      // Fret (pocket separator)
-      ctx.beginPath();
-      ctx.moveTo(
-        Math.cos(startA) * pocketInnerR,
-        Math.sin(startA) * pocketInnerR
-      );
-      ctx.lineTo(
-        Math.cos(startA) * pocketOuterR,
-        Math.sin(startA) * pocketOuterR
-      );
-      ctx.strokeStyle = '#c0c0b0';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      // Fret wall (3D bevel: highlight + body + shadow)
+      const halfFret = segmentAngle * 0.06;
+      const fretLines = [
+        { offset: -halfFret, color: '#e8e8d0', width: 1.5 }, // bright highlight
+        { offset: 0,         color: '#a0a090', width: 2   }, // main body
+        { offset: +halfFret, color: '#404038', width: 1.5 }, // dark shadow
+      ];
+      for (const { offset, color, width } of fretLines) {
+        const a = startA + offset;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * pocketInnerR, Math.sin(a) * pocketInnerR);
+        ctx.lineTo(Math.cos(a) * pocketOuterR, Math.sin(a) * pocketOuterR);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.stroke();
+      }
 
       // Name label — text along the radial direction, reading outward from center
       const midAngle = startA + segmentAngle / 2;
@@ -404,6 +408,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
     if (spinningRef.current) return;
 
     spinningRef.current = true;
+    prevPocketIdxRef.current = -1;
     showWinHighlightRef.current = false;
 
     if (names.length < 2) {
@@ -501,7 +506,20 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
 
       // Trigger collision sounds
       if (collision?.deflectorHit) triggerCollision('deflector');
-      if (collision?.fretHit) triggerCollision('fret');
+
+      // Geometric fret-crossing sound (fires during dropping + in_pocket)
+      const ballState = physState.ball.state;
+      if (ballState === 'dropping' || ballState === 'in_pocket') {
+        const relAngle = normalizeAngle(physState.ball.angle - physState.wheel.angle + Math.PI / 2);
+        const curPocketIdx = Math.floor(relAngle / segmentAngle) % TOTAL_POCKETS;
+        if (prevPocketIdxRef.current !== -1 && curPocketIdx !== prevPocketIdxRef.current) {
+          const relSpeed = Math.abs(physState.ball.velocity - physState.wheel.velocity);
+          triggerCollision('fret', relSpeed);
+        }
+        prevPocketIdxRef.current = curPocketIdx;
+      } else {
+        prevPocketIdxRef.current = -1;
+      }
 
       // Update rolling audio each frame
       updateAudio(physState);
