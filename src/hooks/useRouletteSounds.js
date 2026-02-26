@@ -21,8 +21,13 @@ export const AUDIO_CONFIG = {
   rollingOnTrackMax: 0.9,
   rollingDroppingMin: 0.3,
   rollingDroppingMax: 0.7,
-  rollingInPocketMin: 0.05,
-  rollingInPocketMax: 0.25,
+  // In-pocket uses relative velocity (ball vs wheel), different filter character
+  rollingInPocketMin: 0.3,
+  rollingInPocketMax: 0.65,
+  rollingInPocketFilterFreqMin: 300,  // hollow/wooden at slow relative speed
+  rollingInPocketFilterFreqMax: 700,  // still lower/darker than outer track
+  rollingInPocketLfoMax: 10,          // slower click rhythm
+  maxRelVelocity: 4,                  // rad/s — typical max relative vel entering pocket
   rollingSettleRampMs: 150,
   gainSmoothTime: 0.04,   // seconds (setTargetAtTime time constant)
 
@@ -252,25 +257,35 @@ export default function useRouletteSounds() {
 
     const speedNorm = clamp(Math.abs(ball.velocity) / cfg.maxBallVelocity, 0, 1);
 
-    // LFO rate tracks ball speed → rhythmic click texture slows with ball
-    lfoRef.current.frequency.value = lerp(cfg.lfoFreqMin, cfg.lfoFreqMax, speedNorm);
-
-    // Filter brightness tracks speed
-    filterRef.current.frequency.value = lerp(cfg.filterFreqMin, cfg.filterFreqMax, speedNorm);
-    filterRef.current.Q.value         = lerp(cfg.filterQMin,    cfg.filterQMax,    speedNorm);
-
-    // Rolling gain envelope per physics state
+    // Each state controls its own filter, LFO, and gain — in_pocket uses relative velocity
     let targetGain;
     switch (ball.state) {
-      case 'on_track':
-        targetGain = lerp(cfg.rollingOnTrackMin,  cfg.rollingOnTrackMax,  speedNorm);
+      case 'on_track': {
+        lfoRef.current.frequency.value    = lerp(cfg.lfoFreqMin,    cfg.lfoFreqMax,    speedNorm);
+        filterRef.current.frequency.value = lerp(cfg.filterFreqMin, cfg.filterFreqMax, speedNorm);
+        filterRef.current.Q.value         = lerp(cfg.filterQMin,    cfg.filterQMax,    speedNorm);
+        targetGain = lerp(cfg.rollingOnTrackMin, cfg.rollingOnTrackMax, speedNorm);
         break;
-      case 'dropping':
+      }
+      case 'dropping': {
+        lfoRef.current.frequency.value    = lerp(cfg.lfoFreqMin,    cfg.lfoFreqMax,    speedNorm);
+        filterRef.current.frequency.value = lerp(cfg.filterFreqMin, cfg.filterFreqMax, speedNorm);
+        filterRef.current.Q.value         = lerp(cfg.filterQMin,    cfg.filterQMax,    speedNorm);
         targetGain = lerp(cfg.rollingDroppingMin, cfg.rollingDroppingMax, speedNorm);
         break;
-      case 'in_pocket':
-        targetGain = lerp(cfg.rollingInPocketMin, cfg.rollingInPocketMax, speedNorm);
+      }
+      case 'in_pocket': {
+        // Use relative velocity so the rolling sound reflects actual motion within the pocket,
+        // not the wheel spin. ball.velocity ≈ wheelVelocity when deeply settled, so
+        // relVel → 0 and sound fades naturally.
+        const relVel  = Math.abs(ball.velocity - physState.wheel.velocity);
+        const relNorm = clamp(relVel / cfg.maxRelVelocity, 0, 1);
+        lfoRef.current.frequency.value    = lerp(cfg.lfoFreqMin, cfg.rollingInPocketLfoMax, relNorm);
+        filterRef.current.frequency.value = lerp(cfg.rollingInPocketFilterFreqMin, cfg.rollingInPocketFilterFreqMax, relNorm);
+        filterRef.current.Q.value         = lerp(cfg.filterQMin, cfg.filterQMax, relNorm);
+        targetGain = lerp(cfg.rollingInPocketMin, cfg.rollingInPocketMax, relNorm);
         break;
+      }
       default:
         targetGain = 0;
     }
