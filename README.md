@@ -1,4 +1,4 @@
-# Claude Roulette
+# [Claude Roulette](https://youtu.be/Y0dibfhsyHE)
 
 A physics-based roulette wheel for raffles of up to 37 people. Enter names, spin, and let real physics decide the winner.
 
