@@ -1,0 +1,8 @@
+/* Sits to the left of the 40px mute button (8px gap).
+   Extra class in the selector so it beats `.roulette-wheel .sound-toggle { right: 8px }`
+   regardless of stylesheet load order. */
+.roulette-wheel .sound-toggle.skip-button {
+  position: absolute;
+  bottom: 8px;
+  right: 56px;
+}
