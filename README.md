@@ -35,3 +35,4 @@ npm run build     # Production build to dist/
 - Confetti celebration on winner
 - Click the center hub or the Spin button to spin
 - Responsive canvas that scales to fit the container
+- Skip button to save time in case of many spins

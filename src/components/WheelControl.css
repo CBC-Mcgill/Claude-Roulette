@@ -1,4 +1,4 @@
-.sound-toggle {
+.wheel-control {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -12,7 +12,17 @@
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 }
 
-.sound-toggle:hover {
+.wheel-control:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+}
+
+.wheel-control--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-card);
+}
+
+.wheel-control--active:hover {
+  color: var(--color-card);
 }
