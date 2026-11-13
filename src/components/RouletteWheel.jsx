@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   EUROPEAN_ORDER,
   TOTAL_POCKETS,
@@ -54,6 +54,7 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
   const showWinHighlightRef = useRef(false);
   const prevPocketIdxRef = useRef(-1);
   const speedRef = useRef(1); // physics steps per frame; 1 = normal, SKIP_SPEED_FACTOR = skipping
+  const [isSkipping, setIsSkipping] = useState(false); // drives the skip button's pressed look
 
   // Memoize pocket layout: only reshuffles when names change
   const pocketNames = useMemo(() => {
@@ -444,8 +445,8 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
     );
 
     speedRef.current = 1; // every spin starts at normal speed
+    setIsSkipping(false);
     let lastTime = performance.now();
-    let prevNow = lastTime;
     let simElapsedMs = 0;
 
     function finishSpin(settledPocket) {
@@ -480,10 +481,10 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
       if (dt > 0.05) dt = 0.05;
 
       // Skip mode runs several normal-sized physics steps per rendered frame.
-      // The timeout is measured in simulated time so skipping doesn't trip it early.
+      // The timeout counts simulated time (the clamped dt actually stepped), not wall-clock
+      // time, so a backgrounded tab or skip mode can't trip it before the ball settles.
       const steps = speedRef.current;
-      simElapsedMs += (now - prevNow) * steps;
-      prevNow = now;
+      simElapsedMs += dt * 1000 * steps;
 
       // Safety timeout
       if (simElapsedMs > MAX_SPIN_DURATION) {
@@ -570,13 +571,16 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
 
   const handleSkip = useCallback(() => {
     speedRef.current = SKIP_SPEED_FACTOR;
+    setIsSkipping(true);
   }, []);
 
   return (
     <div className="roulette-wheel" ref={containerRef}>
       <canvas ref={canvasRef} className="roulette-wheel__canvas" />
-      {spinning && <SkipButton onSkip={handleSkip} />}
-      <SoundToggle isMuted={isMuted} onToggle={toggleMute} />
+      <div className="roulette-wheel__controls">
+        {spinning && <SkipButton onSkip={handleSkip} isSkipping={isSkipping} />}
+        <SoundToggle isMuted={isMuted} onToggle={toggleMute} />
+      </div>
     </div>
   );
 }
