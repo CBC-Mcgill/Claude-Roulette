@@ -13,10 +13,12 @@
   filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.25));
 }
 
-.roulette-wheel .sound-toggle {
+.roulette-wheel__controls {
   position: absolute;
   bottom: 8px;
   right: 8px;
+  display: flex;
+  gap: 8px;
 }
 
 .roulette-wheel__canvas {

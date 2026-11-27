@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   EUROPEAN_ORDER,
   TOTAL_POCKETS,
@@ -17,7 +17,11 @@ import {
 } from '../utils/wheelMath';
 import useRouletteSounds from '../hooks/useRouletteSounds';
 import SoundToggle from './SoundToggle';
+import SkipButton from './SkipButton';
 import './RouletteWheel.css';
+
+// Skip runs this many normal-sized physics steps per rendered frame (same dynamics, just faster)
+const SKIP_SPEED_FACTOR = 10;
 
 const MIN_CANVAS_SIZE = 200;
 const MAX_CANVAS_SIZE = 700;
@@ -49,6 +53,8 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
   const winningPocketRef = useRef(-1);
   const showWinHighlightRef = useRef(false);
   const prevPocketIdxRef = useRef(-1);
+  const speedRef = useRef(1); // physics steps per frame; 1 = normal, SKIP_SPEED_FACTOR = skipping
+  const [isSkipping, setIsSkipping] = useState(false); // drives the skip button's pressed look
 
   // Memoize pocket layout: only reshuffles when names change
   const pocketNames = useMemo(() => {
@@ -438,10 +444,13 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
       initialWheelAngle, ballStartAngle, ballVelocity, ballTrackR, pocketR
     );
 
-    const startTime = performance.now();
-    let lastTime = startTime;
+    speedRef.current = 1; // every spin starts at normal speed
+    setIsSkipping(false);
+    let lastTime = performance.now();
+    let simElapsedMs = 0;
 
     function finishSpin(settledPocket) {
+      speedRef.current = 1;
       // Snap ball to pocket center
       const pocketLocalAngle = settledPocket * segmentAngle + segmentAngle / 2 - Math.PI / 2;
       const finalBallAngle = physState.wheel.angle + pocketLocalAngle;
@@ -471,55 +480,66 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
       // Clamp dt to avoid huge jumps (e.g., tab was backgrounded)
       if (dt > 0.05) dt = 0.05;
 
-      const elapsed = now - startTime;
+      // Skip mode runs several normal-sized physics steps per rendered frame.
+      // The timeout counts simulated time (the clamped dt actually stepped), not wall-clock
+      // time, so a backgrounded tab or skip mode can't trip it before the ball settles.
+      const steps = speedRef.current;
+      simElapsedMs += dt * 1000 * steps;
 
       // Safety timeout
-      if (elapsed > MAX_SPIN_DURATION) {
+      if (simElapsedMs > MAX_SPIN_DURATION) {
         const pocket = getPocketAtBall(physState.ball.angle, physState.wheel.angle, segmentAngle);
         finishSpin(pocket);
         return;
       }
 
-      // Update wheel
-      updateWheelPhysics(physState.wheel, dt);
-
-      // Update ball based on state
-      let highlightPocket = -1;
-      let collision = null;
-
-      switch (physState.ball.state) {
-        case 'on_track':
-          updateBallOnTrack(physState.ball, dt);
-          break;
-        case 'dropping':
-          collision = updateBallDropping(physState.ball, dt, physState.wheel.angle);
-          break;
-        case 'in_pocket':
-          collision = updateBallInPocket(physState.ball, dt, physState.wheel.angle, physState.wheel.velocity, segmentAngle);
-          break;
-        case 'settled': {
-          const pocket = getPocketAtBall(physState.ball.angle, physState.wheel.angle, segmentAngle);
-          finishSpin(pocket);
-          return;
-        }
+      if (physState.ball.state === 'settled') {
+        const pocket = getPocketAtBall(physState.ball.angle, physState.wheel.angle, segmentAngle);
+        finishSpin(pocket);
+        return;
       }
 
-      // Trigger collision sounds
-      if (collision?.deflectorHit) triggerCollision('deflector');
+      const highlightPocket = -1;
+      let deflectorHit = false;
+      let fretHitSpeed = -1; // strongest fret crossing this frame, -1 = none
 
-      // Geometric fret-crossing sound (fires during dropping + in_pocket)
-      const ballState = physState.ball.state;
-      if (ballState === 'dropping' || ballState === 'in_pocket') {
-        const relAngle = normalizeAngle(physState.ball.angle - physState.wheel.angle + Math.PI / 2);
-        const curPocketIdx = Math.floor(relAngle / segmentAngle) % TOTAL_POCKETS;
-        if (prevPocketIdxRef.current !== -1 && curPocketIdx !== prevPocketIdxRef.current) {
-          const relSpeed = Math.abs(physState.ball.velocity - physState.wheel.velocity);
-          triggerCollision('fret', relSpeed);
+      for (let i = 0; i < steps; i++) {
+        updateWheelPhysics(physState.wheel, dt);
+
+        switch (physState.ball.state) {
+          case 'on_track':
+            updateBallOnTrack(physState.ball, dt);
+            break;
+          case 'dropping':
+            if (updateBallDropping(physState.ball, dt, physState.wheel.angle).deflectorHit) {
+              deflectorHit = true;
+            }
+            break;
+          case 'in_pocket':
+            updateBallInPocket(physState.ball, dt, physState.wheel.angle, physState.wheel.velocity, segmentAngle);
+            break;
         }
-        prevPocketIdxRef.current = curPocketIdx;
-      } else {
-        prevPocketIdxRef.current = -1;
+
+        // Geometric fret-crossing detection (fires during dropping + in_pocket)
+        const ballState = physState.ball.state;
+        if (ballState === 'dropping' || ballState === 'in_pocket') {
+          const relAngle = normalizeAngle(physState.ball.angle - physState.wheel.angle + Math.PI / 2);
+          const curPocketIdx = Math.floor(relAngle / segmentAngle) % TOTAL_POCKETS;
+          if (prevPocketIdxRef.current !== -1 && curPocketIdx !== prevPocketIdxRef.current) {
+            const relSpeed = Math.abs(physState.ball.velocity - physState.wheel.velocity);
+            fretHitSpeed = Math.max(fretHitSpeed, relSpeed);
+          }
+          prevPocketIdxRef.current = curPocketIdx;
+        } else {
+          prevPocketIdxRef.current = -1;
+        }
+
+        if (ballState === 'settled') break; // finish on the next frame, as before
       }
+
+      // Collision sounds: at most one of each per frame, so skip mode isn't a machine-gun
+      if (deflectorHit) triggerCollision('deflector');
+      if (fretHitSpeed >= 0) triggerCollision('fret', fretHitSpeed);
 
       // Update rolling audio each frame
       updateAudio(physState);
@@ -545,13 +565,22 @@ export default function RouletteWheel({ names, spinning, onSpinEnd, onSpin, them
         animFrameRef.current = null;
       }
       spinningRef.current = false;
+      speedRef.current = 1;
     };
   }, [spinning]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSkip = useCallback(() => {
+    speedRef.current = SKIP_SPEED_FACTOR;
+    setIsSkipping(true);
+  }, []);
 
   return (
     <div className="roulette-wheel" ref={containerRef}>
       <canvas ref={canvasRef} className="roulette-wheel__canvas" />
-      <SoundToggle isMuted={isMuted} onToggle={toggleMute} />
+      <div className="roulette-wheel__controls">
+        {spinning && <SkipButton onSkip={handleSkip} isSkipping={isSkipping} />}
+        <SoundToggle isMuted={isMuted} onToggle={toggleMute} />
+      </div>
     </div>
   );
 }
